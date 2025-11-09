@@ -3,6 +3,7 @@
 #include <WiFiS3.h>
 #include "coreiot.h"
 
+
 const char *ap_ssid = "UNO_R4_AP";
 const char *ap_pass = "12345678";
 WiFiServer server(80);
@@ -233,159 +234,179 @@ void handleConnect(const String &req)
 
 void startAP()
 {
-  delay(2000);
-  Serial.println("Starting AP mode...");
-  WiFi.end();
-  WiFi.beginAP(ap_ssid, ap_pass);
-  delay(2000);
-  Serial.print("AP IP: ");
-  Serial.println(WiFi.localIP());
-  isAPMode = true;
-}
-
-void revert_to_AP()
-{
-  Serial.println("🔄 Reverting to AP mode...");
   WiFi.disconnect();
-  delay(300);
-  WiFi.end();
-  delay(300);
+  delay(500);
 
-  Serial.println("Starting Access Point...");
-  WiFi.beginAP(ap_ssid, ap_pass);
-  delay(2000);
-  Serial.print("AP IP: ");
-  Serial.println(WiFi.localIP());
-  isAPMode = true;
+  if (WiFi.beginAP(ap_ssid, ap_pass) == WL_AP_LISTENING) {
+    Serial.println("[WiFi] Access Point mode started successfully!");
+    Serial.print("SSID: "); Serial.println(ap_ssid);
+    Serial.print("Password: "); Serial.println(ap_pass);
+    Serial.print("IP address: "); Serial.println(WiFi.localIP());
 
-  server.begin();
-  Serial.println("✅ Web server restarted at 192.168.4.1");
+    server.begin();   // Bắt đầu HTTP server trên cổng 80
+  } else {
+    Serial.println("[WiFi] Failed to start Access Point mode!");
+  }
 }
 
-void startSTA(const char *ssid, const char *pass)
+
+bool startSTA(const char* ssid, const char* pass)
 {
-  Serial.println("Switching to STA mode...");
-  WiFi.end();
+  Serial.print("[WiFi] Trying to connect to WiFi: ");
+  Serial.println(ssid);
+
+  WiFi.disconnect();
+  delay(500);
   WiFi.begin(ssid, pass);
+
   unsigned long start = millis();
+  const unsigned long timeout = 10000; // 10 giây
 
-  // Đợi tối đa 10 giây để kết nối Wi-Fi
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 10000)
-  {
-    delay(500);
+  while (WiFi.status() != WL_CONNECTED && millis() - start < timeout) {
     Serial.print(".");
+    delay(500);
   }
 
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    Serial.println("\nConnected to STA network!");
-    Serial.print("STA IP: ");
-    Serial.println(WiFi.localIP());
-    isAPMode = false;
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n[WiFi] Connected successfully!");
+    Serial.print("STA IP: "); Serial.println(WiFi.localIP());
 
-    // ✅ Khởi động task CoreIoT sau khi STA kết nối thành công
-    xTaskCreate(coreiot_task, "BLINK", 512, NULL, 2, NULL);
-  }
-  else
-  {
-    Serial.println("\nSTA connection failed, reverting to AP mode");
-    need_revert_AP = true;
+    // ✅ Chuyển qua STA thành công -> chạy CoreIoT
+    xTaskCreate(coreiot_task, "COREIOT", 4096, NULL, 1, NULL);
+
+    return true;
+  } else {
+    Serial.println("\n[WiFi] Connection failed, returning to AP mode...");
+    return false;
   }
 }
+
+
 
 void webserver_task(void *pvParameters)
 {
+  Serial.println("[HTTP] webserver_task started");
+
+  // Khởi động ở AP mode
   startAP();
-  server.begin();
-  Serial.println("HTTP server started");
 
   SensorData latestData = {0, 0};
 
   while (1)
   {
-    if (need_revert_AP)
-    {
-      revert_to_AP();
-      need_revert_AP = false;
-      vTaskDelay(3000);
-    }
     WiFiClient client = server.available();
-    if (client)
-    {
-      Serial.println("Client access");
-      String req = client.readStringUntil('\r');
-      client.flush();
+    if (!client) {
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
 
-      // Handle /connect (switch to STA)
-      if (req.indexOf("GET /connect") != -1)
-      {
-        handleConnect(req);
-        client.println("HTTP/1.1 200 OK");
-        client.println("Content-Type: text/plain");
-        client.println("Connection: close");
-        client.println();
-        client.println("Connecting to WiFi...");
-        client.stop();
-        startSTA(wifi_ssid.c_str(), wifi_password.c_str());
-        continue;
-      }
+    Serial.println("[HTTP] Client connected");
 
-      // Settings page
-      if (req.indexOf("GET /settings") != -1)
-      {
-        Serial.println("Serving settings page...");
+    // Đọc request
+    String req = client.readStringUntil('\r');
+    client.flush();
+    Serial.println(req);
+
+    // ===========================
+    // 1) Xử lý /connect?ssid=...&pass=...
+    // ===========================
+    if (req.startsWith("GET /connect")) {
+      int ssidIndex = req.indexOf("ssid=");
+      int passIndex = req.indexOf("&pass=");
+      if (ssidIndex > 0 && passIndex > 0) {
+        wifi_ssid = req.substring(ssidIndex + 5, passIndex);
+        wifi_password = req.substring(passIndex + 6, req.indexOf(" ", passIndex));
+
+        // Decode đơn giản %20 -> space
+        wifi_ssid.replace("%20", " ");
+        wifi_password.replace("%20", " ");
+
+        Serial.println("[HTTP] User input:");
+        Serial.print("SSID: "); Serial.println(wifi_ssid);
+        Serial.print("PASS: "); Serial.println(wifi_password);
+
+        // Trả lời trình duyệt
         client.println("HTTP/1.1 200 OK");
         client.println("Content-Type: text/html");
         client.println("Connection: close");
         client.println();
-        client.print(settingsPage());
-        delay(10);
+        client.println("<html><body>");
+        client.println("<h3>Trying to connect...</h3>");
+        client.println("<p>Check Serial Monitor for status.</p>");
+        client.println("</body></html>");
         client.stop();
-        continue;
-      }
 
-      // Sensors JSON
-      if (req.indexOf("GET /sensors") != -1)
-      {
-        if (xQueuePeek(qTempHumi, &latestData, 0) != pdTRUE)
-        {
-          Serial.println("⚠️ No sensor data yet");
-          latestData.temperature = -1;
-          latestData.humidity = -1;
+        // Thử kết nối STA
+        if (!startSTA(wifi_ssid.c_str(), wifi_password.c_str())) {
+          // Nếu fail -> quay lại AP mode + server
+          startAP();
         }
-        String json = "{\"temperature\":";
-        json += String(latestData.temperature, 1);
-        json += ",\"humidity\":";
-        json += String(latestData.humidity, 1);
-        json += "}";
-        client.println("HTTP/1.1 200 OK");
-        client.println("Content-Type: application/json");
-        client.println("Connection: close");
-        client.println();
-        client.print(json);
-        client.stop();
+
         continue;
       }
+    }
 
-      // LED controls
-      if (req.indexOf("/led1?state=on") != -1)
-        digitalWrite(13, HIGH);
-      else if (req.indexOf("/led1?state=off") != -1)
-        digitalWrite(13, LOW);
-      else if (req.indexOf("/led2?state=on") != -1)
-        digitalWrite(4, HIGH);
-      else if (req.indexOf("/led2?state=off") != -1)
-        digitalWrite(4, LOW);
-
-      // Default: main page
+    // ===========================
+    // 2) /settings: trang nhập WiFi
+    // ===========================
+    if (req.indexOf("GET /settings") != -1) {
+      Serial.println("[HTTP] Serving settings page...");
       client.println("HTTP/1.1 200 OK");
       client.println("Content-Type: text/html");
       client.println("Connection: close");
       client.println();
-      client.print(mainPage());
-      delay(10);
+      client.print(settingsPage());
+      vTaskDelay(pdMS_TO_TICKS(10));
       client.stop();
+      continue;
     }
+
+    // ===========================
+    // 3) /sensors: trả JSON
+    // ===========================
+    if (req.indexOf("GET /sensors") != -1) {
+      if (xQueuePeek(qTempHumi, &latestData, 0) != pdTRUE) {
+        Serial.println("[HTTP] No sensor data yet");
+        latestData.temperature = -1;
+        latestData.humidity = -1;
+      }
+
+      String json = "{\"temperature\":";
+      json += String(latestData.temperature, 1);
+      json += ",\"humidity\":";
+      json += String(latestData.humidity, 1);
+      json += "}";
+
+      client.println("HTTP/1.1 200 OK");
+      client.println("Content-Type: application/json");
+      client.println("Connection: close");
+      client.println();
+      client.print(json);
+      client.stop();
+      continue;
+    }
+
+    // ===========================
+    // 4) Điều khiển LED (nếu bạn đang dùng)
+    // ===========================
+    if (req.indexOf("/led1?state=on") != -1)
+      digitalWrite(13, HIGH);
+    else if (req.indexOf("/led1?state=off") != -1)
+      digitalWrite(13, LOW);
+    else if (req.indexOf("/led2?state=on") != -1)
+      digitalWrite(4, HIGH);
+    else if (req.indexOf("/led2?state=off") != -1)
+      digitalWrite(4, LOW);
+
+    // ===========================
+    // 5) Mặc định: trả mainPage()
+    // ===========================
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/html");
+    client.println("Connection: close");
+    client.println();
+    client.print(mainPage());
     vTaskDelay(pdMS_TO_TICKS(100));
+    client.stop();
   }
 }
