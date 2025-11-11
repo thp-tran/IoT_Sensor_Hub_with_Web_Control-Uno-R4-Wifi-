@@ -12,7 +12,9 @@
 This project implements an **IoT Sensor Hub** on the **Arduino UNO R4 WiFi** (Renesas RA4M1 + ESP32-S3) platform.  
 It measures **temperature and humidity** using a DHT sensor, displays readings on an **LCD and LED matrix**,  
 and allows remote monitoring & control through a **local web dashboard** and **CoreIoT cloud**.
-
+<p align="center">
+  <img src="images/project.jpg" width="30%" />
+</p>
 ---
 
 ## ⚙️ Features
