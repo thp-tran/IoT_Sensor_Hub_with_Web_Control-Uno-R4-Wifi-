@@ -18,7 +18,7 @@ and allows remote monitoring & control through a **local web dashboard** and **C
 ## ⚙️ Features
 
 ### 🌡️ Environmental Monitoring
-- Reads temperature & humidity via **DHT11/DHT20**.
+- Reads temperature & humidity via **DHT22**.
 - Displays data on **I2C LCD (20x4)** and optional **LED matrix**.
 
 ### 💻 Local Web Dashboard
