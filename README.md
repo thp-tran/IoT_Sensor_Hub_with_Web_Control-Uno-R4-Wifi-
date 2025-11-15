@@ -21,6 +21,9 @@ and allows remote monitoring & control through a **local web dashboard** and **C
 - Controls an LED to blink based on humidity readings.
 
 ### 💻 Local Web Dashboard
+<p align="center">
+  <img src="images/webserver.jpg" width="80%" />
+</p>
 - Hosted directly on UNO R4 WiFi.
 - Access in AP mode at **`http://192.168.4.1`**
 - Features:
